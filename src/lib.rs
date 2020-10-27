@@ -130,12 +130,9 @@ pub struct Cycle<T> {
     sequence: Sequence<T>,
 }
 impl<T> Cycle<T> {
-    pub fn new(elements: Vec<Box<dyn LevelPlanElement<T>>>) -> Self {
+    pub fn new(sequence: Sequence<T>) -> Self {
         Self {
-            sequence: Sequence {
-                index: 0,
-                elements
-            },
+            sequence,
         }
     }
 }
@@ -177,33 +174,42 @@ impl<T, C: Send + Sync + Clone + 'static> LevelPlanElement<T> for SetComponent<C
     }
 }
 
-pub struct IfElse<T> {
+pub struct Conditional<T> {
     condition: Box<dyn Fn(&T) -> bool + Send + Sync + 'static>,
     if_branch: Box<dyn LevelPlanElement<T>>,
     if_active: bool,
     else_branch: Option<Box<dyn LevelPlanElement<T>>>,
     else_active: bool,
 }
-impl<T> IfElse<T> {
+impl<T> Conditional<T> {
     pub fn new(
         condition: impl Fn(&T) -> bool + Send + Sync + 'static,
         if_branch: impl LevelPlanElement<T> + 'static,
-        else_branch: Option<impl LevelPlanElement<T> + 'static>,
     ) -> Self {
-        let mut boxed_else_branch:Option<Box<dyn LevelPlanElement<T> + 'static>> = None;
-        if let Some(else_branch) = else_branch {
-            boxed_else_branch = Some(Box::new(else_branch));
-        }
         Self {
             condition: Box::new(condition),
             if_branch: Box::new(if_branch),
             if_active: false,
-            else_branch: boxed_else_branch,
+            else_branch: None,
+            else_active: false,
+        }
+    }
+
+    pub fn if_else(
+        condition: impl Fn(&T) -> bool + Send + Sync + 'static,
+        if_branch: impl LevelPlanElement<T> + 'static,
+        else_branch: impl LevelPlanElement<T> + 'static,
+    ) -> Self {
+        Self {
+            condition: Box::new(condition),
+            if_branch: Box::new(if_branch),
+            if_active: false,
+            else_branch: Some(Box::new(else_branch)),
             else_active: false,
         }
     }
 }
-impl<T> LevelPlanElement<T> for IfElse<T> {
+impl<T> LevelPlanElement<T> for Conditional<T> {
     fn step(&mut self, level: Entity, commands: &mut Commands, context: &mut T) -> bool {
         if (self.condition)(context) {
             if !self.if_active {

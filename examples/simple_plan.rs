@@ -5,20 +5,215 @@ use rand::Rng;
 use bevy::{prelude::*, render::camera::OrthographicProjection, sprite::collide_aabb::collide};
 
 use bevy_level_plan::{
-    level_progress_system, LevelPlan, LevelPlanElement, Nop, Sequence, SetComponent, While, IfElse,
+    level_progress_system, LevelPlan, LevelPlanElement, Nop, Sequence, SetComponent, While, Conditional, Cycle,
 };
+
+/// LevelPlan related stuff
+
+fn make_level_plan(level_length: f32) -> LevelPlan<LevelContext> {
+    LevelPlan::<LevelContext>::new(Sequence::default()
+        .push(ForDistance::new(
+            level_length - 800.0,
+            Cycle::new(Sequence::default()
+                .push(ForDistance::new(
+                    500.0,
+                    SetComponent::new(DiverSpawner::default()),
+                ))
+                .push(ForDistance::new(
+                    500.0,
+                    SetComponent::new(SwooperSpawner::default()),
+                ))
+            )
+        ))
+        .push(Conditional::<LevelContext>::new(
+            move |context| {context.player_health < 4},
+            SpawnPowerups,
+        ))
+        .push(While::<LevelContext>::new(
+            |context| {
+                context.boss_spawned
+            },
+            SpawnBoss
+        ))
+        .push(YouWin)
+    )
+}
+
+struct LevelContext {
+    player_loc: Vec3,
+    player_health: u32,
+    boss_spawned: bool,
+}
+impl bevy_level_plan::LevelContext for LevelContext {
+    fn build(world: &World, resources: &Resources) -> Self {
+        let mut player_loc = Vec3::zero();
+        let mut player_health = 4;
+        if let Some((_, transform, health)) = world.query::<(&Player, &Transform, &Health)>().iter().next() {
+            player_loc = transform.translation();
+            player_health = health.0;
+        }
+        Self {
+            player_loc,
+            player_health,
+            boss_spawned: world.query::<&Boss>().iter().count() > 0
+        }
+    }
+}
+
+pub struct ForDistance {
+    length: f32,
+    start: f32,
+    element: Box<dyn LevelPlanElement<LevelContext>>,
+}
+impl ForDistance {
+    fn new(
+        length: f32,
+        element: impl LevelPlanElement<LevelContext> + 'static,
+    ) -> Self {
+        Self {
+            length,
+            start: f32::MAX,
+            element: Box::new(element),
+        }
+    }
+}
+impl LevelPlanElement<LevelContext> for ForDistance {
+    fn step(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) -> bool {
+        if context.player_loc.y() < self.start + self.length {
+            self.element.step(level, commands, context)
+        } else {
+            false
+        }
+    }
+
+    fn activate(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) {
+        self.start = context.player_loc.y();
+        self.element.activate(level, commands, context);
+    }
+
+    fn deactivate(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) {
+        self.element.deactivate(level, commands, context);
+    }
+}
+
+struct SpawnPowerups;
+impl LevelPlanElement<LevelContext> for SpawnPowerups {
+    fn step(&mut self, _level: Entity, _commands: &mut Commands, _context: &mut LevelContext) -> bool {
+        false
+    }
+
+    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut LevelContext) {
+        for _ in 0..3 {
+            commands.spawn((Powerup,));
+        }
+    }
+}
+
+struct SpawnBoss;
+impl<T> LevelPlanElement<T> for SpawnBoss {
+    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut T) {
+        commands.spawn((Boss,));
+    }
+}
+
+struct YouWin;
+impl<T> LevelPlanElement<T> for YouWin {
+    fn activate(&mut self, _level: Entity, _commands: &mut Commands, _context: &mut T) {
+        println!("You win!");
+        std::process::exit(0);
+    }
+}
+
+#[derive(Clone)]
+struct DiverSpawner(Timer);
+impl Default for DiverSpawner {
+    fn default() -> Self {
+        Self(Timer::new(Duration::from_secs_f32(1.0), true))
+    }
+}
+
+fn diver_spawner(
+    mut commands: Commands,
+    bounds: Res<LevelBounds>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    time: Res<Time>,
+    main_camera: Res<MainCamera>,
+    mut spawner: Mut<DiverSpawner>,
+    _level: &LevelPlan<LevelContext>,
+) {
+    spawner.0.tick(time.delta_seconds);
+    if spawner.0.finished {
+        let x = rand::thread_rng().gen_range(bounds.0.left + 16.0, bounds.0.right - 16.0);
+        let y =
+            (main_camera.0.translation().y() + main_camera.1.top + 50.0).min(bounds.0.top - 16.0);
+        commands
+            .spawn(SpriteComponents {
+                material: materials.add(Color::rgb(0.0, 1.0, 0.0).into()),
+                sprite: Sprite::new(Vec2::new(32.0, 32.0)),
+                transform: Transform::from_translation(Vec3::new(x, y, 1.0)),
+                ..Default::default()
+            })
+            .with(Velocity(Vec2::new(0.0, -500.0), true))
+            .with(Health(1))
+            .with(Enemy);
+    }
+}
+
+#[derive(Clone)]
+struct SwooperSpawner(Timer);
+impl Default for SwooperSpawner {
+    fn default() -> Self {
+        Self(Timer::new(Duration::from_secs_f32(0.5), true))
+    }
+}
+
+fn swooper_spawner(
+    mut commands: Commands,
+    bounds: Res<LevelBounds>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    time: Res<Time>,
+    main_camera: Res<MainCamera>,
+    mut spawner: Mut<SwooperSpawner>,
+    _level: &LevelPlan<LevelContext>,
+) {
+    spawner.0.tick(time.delta_seconds);
+    if spawner.0.finished {
+        let (x, vx) = if rand::random() {
+            (bounds.0.right - 16.0, -500.0)
+        } else {
+            (bounds.0.left + 16.0, 500.0)
+        };
+        let y = rand::thread_rng().gen_range(
+            main_camera.0.translation().y() + main_camera.1.bottom + 16.0,
+            main_camera.0.translation().y() + main_camera.1.top - 16.0,
+        );
+        commands
+            .spawn(SpriteComponents {
+                material: materials.add(Color::rgb(0.0, 0.0, 1.0).into()),
+                sprite: Sprite::new(Vec2::new(32.0, 32.0)),
+                transform: Transform::from_translation(Vec3::new(x, y, 1.0)),
+                ..Default::default()
+            })
+            .with(Velocity(Vec2::new(vx, 0.0), true))
+            .with(Health(1))
+            .with(Enemy);
+    }
+}
+
+
+/// General game stuff
 
 fn main() {
     App::build()
         .add_default_plugins()
         .add_system(level_progress_system::<LevelContext>.thread_local_system())
-        .add_system(player_system.system())
-        .add_system(velocity_system.system())
+        .add_system(player_controls.system())
+        .add_system(movement.system())
         .add_system(diver_spawner.system())
         .add_system(swooper_spawner.system())
         .add_system(boss_spawner.system())
         .add_system(collision.system())
-        .add_system(health.system())
+        .add_system(death_monitor.system())
         .add_system(powerup_pickup.system())
         .add_system(powerup_spawner.system())
         .add_system(flash.system())
@@ -39,56 +234,29 @@ struct Powerup;
 #[derive(Clone)]
 struct LevelBounds(Rect<f32>);
 
-struct LevelContext {
-    player_loc: Vec3,
-    player_health: u32,
-    camera: MainCamera,
-    boss_spawned: bool,
-}
-impl bevy_level_plan::LevelContext for LevelContext {
-    fn build(world: &World, resources: &Resources) -> Self {
-        let mut player_loc = Vec3::zero();
-        let mut player_health = 4;
-        if let Some((_, transform, health)) = world.query::<(&Player, &Transform, &Health)>().iter().next() {
-            player_loc = transform.translation();
-            player_health = health.0;
-        }
-        Self {
-            player_loc,
-            player_health,
-            camera: (*resources.get::<MainCamera>().unwrap()).clone(),
-            boss_spawned: world.query::<&Boss>().iter().count() > 0
-        }
-    }
-}
-
 fn setup(mut commands: Commands, mut materials: ResMut<Assets<ColorMaterial>>) {
     let bounds = Rect {
         left: -500.0,
         right: 500.0,
         bottom: 0.0,
-        top: 3000.0,
+        top: 5000.0,
     };
     make_backdrop(&mut commands, &mut materials, bounds);
+    make_health_ui(&mut commands, &mut materials);
+    make_player(&mut commands, &mut materials, bounds);
     commands
         .spawn(UiCameraComponents::default())
-        .spawn(SpriteComponents {
-            material: materials.add(Color::rgba(1.0, 0.0, 0.0, 1.0).into()),
-            sprite: Sprite::new(Vec2::new(32.0, 32.0)),
-            transform: Transform::from_translation(Vec3::new(0.0, bounds.bottom + 32.0, 1.0)),
-            draw: Draw {
-                is_transparent: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .with(Player)
-        .with(Health(4))
-        .with(HealthFlash(0))
-        .with(Velocity(Vec2::zero(), false))
-        .with_children(|parent| {
-            parent.spawn(Camera2dComponents::default());
-        })
+        .insert_resource(MainCamera::default())
+        .spawn((make_level_plan(bounds.top - bounds.bottom),))
+        .insert_resource(LevelBounds(bounds));
+}
+
+
+fn make_health_ui(
+    commands: &mut Commands,
+    materials: &mut Assets<ColorMaterial>,
+) {
+    commands
         .spawn(NodeComponents {
             style: Style {
                 size: Size::new(Val::Px(98.0), Val::Px(98.0)),
@@ -171,65 +339,32 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<ColorMaterial>>) {
                 .with(HealthUi(3))
                 ;
             });
+        });
+}
+
+fn make_player(
+    commands: &mut Commands,
+    materials: &mut Assets<ColorMaterial>,
+    bounds: Rect<f32>,
+) {
+    commands
+        .spawn(SpriteComponents {
+            material: materials.add(Color::rgba(1.0, 0.0, 0.0, 1.0).into()),
+            sprite: Sprite::new(Vec2::new(32.0, 32.0)),
+            transform: Transform::from_translation(Vec3::new(0.0, bounds.bottom + 32.0, 1.0)),
+            draw: Draw {
+                is_transparent: true,
+                ..Default::default()
+            },
+            ..Default::default()
         })
-        .insert_resource(MainCamera::default())
-        .insert_resource(LevelBounds(bounds))
-        .spawn((LevelPlan::<LevelContext>::new(Sequence::default()
-            .push(While::<LevelContext>::new(
-                move |context| context.player_loc.y() < bounds.bottom + 1000.0,
-                SetComponent::new(DiverSpawner::default()),
-            ))
-            .push(While::<LevelContext>::new(
-                move |context| context.player_loc.y() < bounds.top - 800.0,
-                SetComponent::new(SwooperSpawner::default()),
-            ))
-            .push(While::<LevelContext>::new(
-                move |context| {
-                    context.camera.0.translation().y() + context.camera.1.top < bounds.top - 400.0
-                },
-                Nop,
-            ))
-            .push(IfElse::<LevelContext>::new(
-                move |context| {context.player_health < 4},
-                SpawnPowerups,
-                None::<SpawnPowerups>
-            ))
-            .push(While::<LevelContext>::new(
-                |context| {
-                    context.boss_spawned
-                },
-                SpawnBoss
-            ))
-            .push(YouWin)
-        ),));
-}
-
-struct SpawnPowerups;
-impl LevelPlanElement<LevelContext> for SpawnPowerups {
-    fn step(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) -> bool {
-        false
-    }
-
-    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut LevelContext) {
-        for _ in 0..3 {
-            commands.spawn((Powerup,));
-        }
-    }
-}
-
-struct SpawnBoss;
-impl<T> LevelPlanElement<T> for SpawnBoss {
-    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut T) {
-        commands.spawn((Boss,));
-    }
-}
-
-struct YouWin;
-impl<T> LevelPlanElement<T> for YouWin {
-    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut T) {
-        println!("You win!");
-        std::process::exit(0);
-    }
+        .with(Player)
+        .with(Health(4))
+        .with(HealthFlash(0))
+        .with(Velocity(Vec2::zero(), false))
+        .with_children(|parent| {
+            parent.spawn(Camera2dComponents::default());
+        });
 }
 
 fn make_backdrop(
@@ -260,7 +395,7 @@ fn make_backdrop(
     }
 }
 
-fn player_system(
+fn player_controls(
     keyboard_input: Res<Input<KeyCode>>,
     _player: &Player,
     mut velocity: Mut<Velocity>,
@@ -281,7 +416,7 @@ fn player_system(
     velocity.0 = direction * 600.0;
 }
 
-fn velocity_system(
+fn movement(
     bounds: Res<LevelBounds>,
     time: Res<Time>,
     mut velocity: Mut<Velocity>,
@@ -333,81 +468,6 @@ fn velocity_system(
     }
 }
 
-#[derive(Clone)]
-struct DiverSpawner(Timer);
-impl Default for DiverSpawner {
-    fn default() -> Self {
-        Self(Timer::new(Duration::from_secs_f32(1.0), true))
-    }
-}
-
-fn diver_spawner(
-    mut commands: Commands,
-    bounds: Res<LevelBounds>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    time: Res<Time>,
-    main_camera: Res<MainCamera>,
-    mut spawner: Mut<DiverSpawner>,
-    _level: &LevelPlan<LevelContext>,
-) {
-    spawner.0.tick(time.delta_seconds);
-    if spawner.0.finished {
-        let x = rand::thread_rng().gen_range(bounds.0.left + 16.0, bounds.0.right - 16.0);
-        let y =
-            (main_camera.0.translation().y() + main_camera.1.top + 50.0).min(bounds.0.top - 16.0);
-        commands
-            .spawn(SpriteComponents {
-                material: materials.add(Color::rgb(0.0, 1.0, 0.0).into()),
-                sprite: Sprite::new(Vec2::new(32.0, 32.0)),
-                transform: Transform::from_translation(Vec3::new(x, y, 1.0)),
-                ..Default::default()
-            })
-            .with(Velocity(Vec2::new(0.0, -500.0), true))
-            .with(Health(1))
-            .with(Enemy);
-    }
-}
-
-#[derive(Clone)]
-struct SwooperSpawner(Timer);
-impl Default for SwooperSpawner {
-    fn default() -> Self {
-        Self(Timer::new(Duration::from_secs_f32(0.5), true))
-    }
-}
-
-fn swooper_spawner(
-    mut commands: Commands,
-    bounds: Res<LevelBounds>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    time: Res<Time>,
-    main_camera: Res<MainCamera>,
-    mut spawner: Mut<SwooperSpawner>,
-    _level: &LevelPlan<LevelContext>,
-) {
-    spawner.0.tick(time.delta_seconds);
-    if spawner.0.finished {
-        let (x, vx) = if rand::random() {
-            (bounds.0.right - 16.0, -500.0)
-        } else {
-            (bounds.0.left + 16.0, 500.0)
-        };
-        let y = rand::thread_rng().gen_range(
-            main_camera.0.translation().y() + main_camera.1.bottom + 16.0,
-            main_camera.0.translation().y() + main_camera.1.top - 16.0,
-        );
-        commands
-            .spawn(SpriteComponents {
-                material: materials.add(Color::rgb(0.0, 0.0, 1.0).into()),
-                sprite: Sprite::new(Vec2::new(32.0, 32.0)),
-                transform: Transform::from_translation(Vec3::new(x, y, 1.0)),
-                ..Default::default()
-            })
-            .with(Velocity(Vec2::new(vx, 0.0), true))
-            .with(Health(1))
-            .with(Enemy);
-    }
-}
 
 fn powerup_spawner(
     mut commands: Commands,
@@ -499,12 +559,11 @@ fn player_health_ui(
 }
 
 fn collision(
-    mut commands: Commands,
     mut player_query: Query<(&Player, &mut Health, &HealthFlash, &Transform, &Sprite)>,
-    mut enemy_query: Query<(Entity, &Enemy, &mut Health, Option<&HealthFlash>, &Transform, &Sprite)>,
+    mut enemy_query: Query<(&Enemy, &mut Health, Option<&HealthFlash>, &Transform, &Sprite)>,
 ) {
     if let Some((_player, mut player_health, player_flash, player_transform, player_sprite)) = player_query.iter().iter().next() {
-        for (enemy_entity, _, mut enemy_health, maybe_enemy_flash, enemy_transform, enemy_sprite) in &mut enemy_query.iter() {
+        for (_, mut enemy_health, maybe_enemy_flash, enemy_transform, enemy_sprite) in &mut enemy_query.iter() {
             let collision = collide(
                 enemy_transform.translation(),
                 enemy_sprite.size,
@@ -533,7 +592,7 @@ fn collision(
     }
 }
 
-fn health(
+fn death_monitor(
     mut commands: Commands,
     entity: Entity,
     health: &Health,
