@@ -48,9 +48,18 @@ pub struct Sequence<T> {
     index: usize,
     elements: Vec<Box<dyn LevelPlanElement<T>>>,
 }
+impl<T> Default for Sequence<T> {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            elements: Vec::new()
+        }
+    }
+}
 impl<T> Sequence<T> {
-    pub fn new(elements: Vec<Box<dyn LevelPlanElement<T>>>) -> Self {
-        Self { index: 0, elements }
+    pub fn push(mut self, element: impl LevelPlanElement<T> + 'static) -> Self {
+        self.elements.push(Box::new(element));
+        self
     }
 }
 impl<T> LevelPlanElement<T> for Sequence<T> {
@@ -123,7 +132,10 @@ pub struct Cycle<T> {
 impl<T> Cycle<T> {
     pub fn new(elements: Vec<Box<dyn LevelPlanElement<T>>>) -> Self {
         Self {
-            sequence: Sequence::new(elements),
+            sequence: Sequence {
+                index: 0,
+                elements
+            },
         }
     }
 }
@@ -162,5 +174,76 @@ impl<T, C: Send + Sync + Clone + 'static> LevelPlanElement<T> for SetComponent<C
 
     fn deactivate(&mut self, level: Entity, commands: &mut Commands, _context: &mut T) {
         commands.remove_one::<C>(level);
+    }
+}
+
+pub struct IfElse<T> {
+    condition: Box<dyn Fn(&T) -> bool + Send + Sync + 'static>,
+    if_branch: Box<dyn LevelPlanElement<T>>,
+    if_active: bool,
+    else_branch: Option<Box<dyn LevelPlanElement<T>>>,
+    else_active: bool,
+}
+impl<T> IfElse<T> {
+    pub fn new(
+        condition: impl Fn(&T) -> bool + Send + Sync + 'static,
+        if_branch: impl LevelPlanElement<T> + 'static,
+        else_branch: Option<impl LevelPlanElement<T> + 'static>,
+    ) -> Self {
+        let mut boxed_else_branch:Option<Box<dyn LevelPlanElement<T> + 'static>> = None;
+        if let Some(else_branch) = else_branch {
+            boxed_else_branch = Some(Box::new(else_branch));
+        }
+        Self {
+            condition: Box::new(condition),
+            if_branch: Box::new(if_branch),
+            if_active: false,
+            else_branch: boxed_else_branch,
+            else_active: false,
+        }
+    }
+}
+impl<T> LevelPlanElement<T> for IfElse<T> {
+    fn step(&mut self, level: Entity, commands: &mut Commands, context: &mut T) -> bool {
+        if (self.condition)(context) {
+            if !self.if_active {
+                self.if_branch.activate(level, commands, context);
+                self.if_active = true;
+            }
+            if self.else_active {
+                if let Some(else_branch) = self.else_branch.as_mut() {
+                    else_branch.deactivate(level, commands, context);
+                }
+                self.else_active = false;
+            }
+            self.if_branch.step(level, commands, context)
+        } else {
+            if self.if_active {
+                self.if_branch.deactivate(level, commands, context);
+                self.if_active = false;
+            }
+            if let Some(else_branch) = self.else_branch.as_mut() {
+                if !self.else_active {
+                    else_branch.activate(level, commands, context);
+                    self.else_active = true;
+                }
+                else_branch.step(level, commands, context)
+            } else {
+                false
+            }
+        }
+    }
+
+    fn deactivate(&mut self, level: Entity, commands: &mut Commands, context: &mut T) {
+        if self.if_active {
+            self.if_branch.deactivate(level, commands, context);
+            self.if_active = false;
+        }
+        if self.else_active {
+            if let Some(else_branch) = self.else_branch.as_mut() {
+                else_branch.deactivate(level, commands, context);
+            }
+            self.else_active = false;
+        }
     }
 }
