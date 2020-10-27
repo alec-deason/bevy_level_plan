@@ -52,7 +52,7 @@ impl<T> Default for Sequence<T> {
     fn default() -> Self {
         Self {
             index: 0,
-            elements: Vec::new()
+            elements: Vec::new(),
         }
     }
 }
@@ -131,9 +131,7 @@ pub struct Cycle<T> {
 }
 impl<T> Cycle<T> {
     pub fn new(sequence: Sequence<T>) -> Self {
-        Self {
-            sequence,
-        }
+        Self { sequence }
     }
 }
 impl<T> LevelPlanElement<T> for Cycle<T> {

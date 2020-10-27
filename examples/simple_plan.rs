@@ -5,37 +5,42 @@ use rand::Rng;
 use bevy::{prelude::*, render::camera::OrthographicProjection, sprite::collide_aabb::collide};
 
 use bevy_level_plan::{
-    level_progress_system, LevelPlan, LevelPlanElement, Nop, Sequence, SetComponent, While, Conditional, Cycle,
+    level_progress_system, Conditional, Cycle, LevelPlan, LevelPlanElement, Sequence, SetComponent,
+    While, Nop,
 };
 
 /// LevelPlan related stuff
 
 fn make_level_plan(level_length: f32) -> LevelPlan<LevelContext> {
-    LevelPlan::<LevelContext>::new(Sequence::default()
-        .push(ForDistance::new(
-            level_length - 800.0,
-            Cycle::new(Sequence::default()
-                .push(ForDistance::new(
-                    500.0,
-                    SetComponent::new(DiverSpawner::default()),
-                ))
-                .push(ForDistance::new(
-                    500.0,
-                    SetComponent::new(SwooperSpawner::default()),
-                ))
-            )
-        ))
-        .push(Conditional::<LevelContext>::new(
-            move |context| {context.player_health < 4},
-            SpawnPowerups,
-        ))
-        .push(While::<LevelContext>::new(
-            |context| {
-                context.boss_spawned
-            },
-            SpawnBoss
-        ))
-        .push(YouWin)
+    LevelPlan::<LevelContext>::new(
+        Sequence::default()
+            .push(ForDistance::new(
+                level_length - 1800.0,
+                Cycle::new(
+                    Sequence::default()
+                        .push(ForDistance::new(
+                            500.0,
+                            SetComponent::new(DiverSpawner::default()),
+                        ))
+                        .push(ForDistance::new(
+                            500.0,
+                            SetComponent::new(SwooperSpawner::default()),
+                        )),
+                ),
+            ))
+            .push(ForDistance::new(
+                1000.0,
+                Nop
+            ))
+            .push(Conditional::<LevelContext>::new(
+                move |context| context.player_health < 4,
+                SpawnPowerups,
+            ))
+            .push(While::<LevelContext>::new(
+                |context| context.boss_spawned,
+                SpawnBoss,
+            ))
+            .push(YouWin),
     )
 }
 
@@ -45,17 +50,21 @@ struct LevelContext {
     boss_spawned: bool,
 }
 impl bevy_level_plan::LevelContext for LevelContext {
-    fn build(world: &World, resources: &Resources) -> Self {
+    fn build(world: &World, _resources: &Resources) -> Self {
         let mut player_loc = Vec3::zero();
         let mut player_health = 4;
-        if let Some((_, transform, health)) = world.query::<(&Player, &Transform, &Health)>().iter().next() {
+        if let Some((_, transform, health)) = world
+            .query::<(&Player, &Transform, &Health)>()
+            .iter()
+            .next()
+        {
             player_loc = transform.translation();
             player_health = health.0;
         }
         Self {
             player_loc,
             player_health,
-            boss_spawned: world.query::<&Boss>().iter().count() > 0
+            boss_spawned: world.query::<&Boss>().iter().count() > 0,
         }
     }
 }
@@ -66,10 +75,7 @@ pub struct ForDistance {
     element: Box<dyn LevelPlanElement<LevelContext>>,
 }
 impl ForDistance {
-    fn new(
-        length: f32,
-        element: impl LevelPlanElement<LevelContext> + 'static,
-    ) -> Self {
+    fn new(length: f32, element: impl LevelPlanElement<LevelContext> + 'static) -> Self {
         Self {
             length,
             start: f32::MAX,
@@ -98,7 +104,12 @@ impl LevelPlanElement<LevelContext> for ForDistance {
 
 struct SpawnPowerups;
 impl LevelPlanElement<LevelContext> for SpawnPowerups {
-    fn step(&mut self, _level: Entity, _commands: &mut Commands, _context: &mut LevelContext) -> bool {
+    fn step(
+        &mut self,
+        _level: Entity,
+        _commands: &mut Commands,
+        _context: &mut LevelContext,
+    ) -> bool {
         false
     }
 
@@ -128,7 +139,7 @@ impl<T> LevelPlanElement<T> for YouWin {
 struct DiverSpawner(Timer);
 impl Default for DiverSpawner {
     fn default() -> Self {
-        Self(Timer::new(Duration::from_secs_f32(1.0), true))
+        Self(Timer::new(Duration::from_secs_f32(0.5), true))
     }
 }
 
@@ -163,7 +174,7 @@ fn diver_spawner(
 struct SwooperSpawner(Timer);
 impl Default for SwooperSpawner {
     fn default() -> Self {
-        Self(Timer::new(Duration::from_secs_f32(0.5), true))
+        Self(Timer::new(Duration::from_secs_f32(0.25), true))
     }
 }
 
@@ -199,7 +210,6 @@ fn swooper_spawner(
             .with(Enemy);
     }
 }
-
 
 /// General game stuff
 
@@ -251,11 +261,7 @@ fn setup(mut commands: Commands, mut materials: ResMut<Assets<ColorMaterial>>) {
         .insert_resource(LevelBounds(bounds));
 }
 
-
-fn make_health_ui(
-    commands: &mut Commands,
-    materials: &mut Assets<ColorMaterial>,
-) {
+fn make_health_ui(commands: &mut Commands, materials: &mut Assets<ColorMaterial>) {
     commands
         .spawn(NodeComponents {
             style: Style {
@@ -273,80 +279,74 @@ fn make_health_ui(
         })
         .with_children(|parent| {
             parent
-            .spawn(NodeComponents {
-                style: Style {
-                    size: Size::new(Val::Percent(50.0), Val::Percent(100.0)),
-                    flex_direction: FlexDirection::Column,
-                    ..Default::default()
-                },
-                material: materials.add(Color::NONE.into()),
-                ..Default::default()
-            })
-            .with_children(|parent| {
-                parent
                 .spawn(NodeComponents {
                     style: Style {
-                        size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
-                        margin: Rect::all(Val::Px(2.0)),
+                        size: Size::new(Val::Percent(50.0), Val::Percent(100.0)),
+                        flex_direction: FlexDirection::Column,
                         ..Default::default()
                     },
-                    material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                    material: materials.add(Color::NONE.into()),
                     ..Default::default()
                 })
-                .with(HealthUi(2))
+                .with_children(|parent| {
+                    parent
+                        .spawn(NodeComponents {
+                            style: Style {
+                                size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
+                                margin: Rect::all(Val::Px(2.0)),
+                                ..Default::default()
+                            },
+                            material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                            ..Default::default()
+                        })
+                        .with(HealthUi(2))
+                        .spawn(NodeComponents {
+                            style: Style {
+                                size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
+                                margin: Rect::all(Val::Px(2.0)),
+                                ..Default::default()
+                            },
+                            material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                            ..Default::default()
+                        })
+                        .with(HealthUi(4));
+                })
                 .spawn(NodeComponents {
                     style: Style {
-                        size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
-                        margin: Rect::all(Val::Px(2.0)),
+                        size: Size::new(Val::Percent(50.0), Val::Percent(100.0)),
+                        flex_direction: FlexDirection::Column,
                         ..Default::default()
                     },
-                    material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                    material: materials.add(Color::NONE.into()),
                     ..Default::default()
                 })
-                .with(HealthUi(4))
-                ;
-            })
-            .spawn(NodeComponents {
-                style: Style {
-                    size: Size::new(Val::Percent(50.0), Val::Percent(100.0)),
-                    flex_direction: FlexDirection::Column,
-                    ..Default::default()
-                },
-                material: materials.add(Color::NONE.into()),
-                ..Default::default()
-            })
-            .with_children(|parent| {
-                parent
-                .spawn(NodeComponents {
-                    style: Style {
-                        size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
-                        margin: Rect::all(Val::Px(2.0)),
-                        ..Default::default()
-                    },
-                    material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-                    ..Default::default()
-                })
-                .with(HealthUi(1))
-                .spawn(NodeComponents {
-                    style: Style {
-                        size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
-                        margin: Rect::all(Val::Px(2.0)),
-                        ..Default::default()
-                    },
-                    material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
-                    ..Default::default()
-                })
-                .with(HealthUi(3))
-                ;
-            });
+                .with_children(|parent| {
+                    parent
+                        .spawn(NodeComponents {
+                            style: Style {
+                                size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
+                                margin: Rect::all(Val::Px(2.0)),
+                                ..Default::default()
+                            },
+                            material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                            ..Default::default()
+                        })
+                        .with(HealthUi(1))
+                        .spawn(NodeComponents {
+                            style: Style {
+                                size: Size::new(Val::Percent(100.0), Val::Percent(50.0)),
+                                margin: Rect::all(Val::Px(2.0)),
+                                ..Default::default()
+                            },
+                            material: materials.add(Color::rgb(1.0, 0.0, 0.0).into()),
+                            ..Default::default()
+                        })
+                        .with(HealthUi(3));
+                });
         });
 }
 
-fn make_player(
-    commands: &mut Commands,
-    materials: &mut Assets<ColorMaterial>,
-    bounds: Rect<f32>,
-) {
+fn make_player(commands: &mut Commands, materials: &mut Assets<ColorMaterial>, bounds: Rect<f32>) {
     commands
         .spawn(SpriteComponents {
             material: materials.add(Color::rgba(1.0, 0.0, 0.0, 1.0).into()),
@@ -468,7 +468,6 @@ fn movement(
     }
 }
 
-
 fn powerup_spawner(
     mut commands: Commands,
     bounds: Res<LevelBounds>,
@@ -478,15 +477,20 @@ fn powerup_spawner(
 ) {
     let mut rng = rand::thread_rng();
     for (entity, _) in &mut powerup_query.iter() {
-            let x = rng.gen_range(bounds.0.left + 16.0, bounds.0.right - 16.0);
-            let y = rng.gen_range(main_camera.0.translation().y() + main_camera.1.bottom, main_camera.0.translation().y() + main_camera.1.top);
-            commands
-                .insert(entity, SpriteComponents {
-                    material: materials.add(Color::rgba(1.0, 0.0, 0.0, 1.0).into()),
-                    sprite: Sprite::new(Vec2::new(32.0, 32.0)),
-                    transform: Transform::from_translation(Vec3::new(x, y, 1.0)),
-                    ..Default::default()
-                });
+        let x = rng.gen_range(bounds.0.left + 16.0, bounds.0.right - 16.0);
+        let y = rng.gen_range(
+            main_camera.0.translation().y() + main_camera.1.bottom,
+            main_camera.0.translation().y() + main_camera.1.top,
+        );
+        commands.insert(
+            entity,
+            SpriteComponents {
+                material: materials.add(Color::rgba(1.0, 0.0, 0.0, 1.0).into()),
+                sprite: Sprite::new(Vec2::new(32.0, 32.0)),
+                transform: Transform::from_translation(Vec3::new(x, y, 1.0)),
+                ..Default::default()
+            },
+        );
     }
 }
 fn boss_spawner(
@@ -511,12 +515,15 @@ fn boss_spawner(
                     ..Default::default()
                 },
             )
-            .insert(entity, (
-                Velocity(Vec2::new(300.0, -300.0), true),
-                Enemy,
-                Health(10),
-                HealthFlash(0),
-            ))
+            .insert(
+                entity,
+                (
+                    Velocity(Vec2::new(300.0, -300.0), true),
+                    Enemy,
+                    Health(10),
+                    HealthFlash(0),
+                ),
+            )
             .spawn(SpriteComponents {
                 material: materials.add(Color::rgb(0.0, 0.0, 0.0).into()),
                 sprite: Sprite::new(Vec2::new(bounds.0.right - bounds.0.left, 64.0)),
@@ -560,10 +567,20 @@ fn player_health_ui(
 
 fn collision(
     mut player_query: Query<(&Player, &mut Health, &HealthFlash, &Transform, &Sprite)>,
-    mut enemy_query: Query<(&Enemy, &mut Health, Option<&HealthFlash>, &Transform, &Sprite)>,
+    mut enemy_query: Query<(
+        &Enemy,
+        &mut Health,
+        Option<&HealthFlash>,
+        &Transform,
+        &Sprite,
+    )>,
 ) {
-    if let Some((_player, mut player_health, player_flash, player_transform, player_sprite)) = player_query.iter().iter().next() {
-        for (_, mut enemy_health, maybe_enemy_flash, enemy_transform, enemy_sprite) in &mut enemy_query.iter() {
+    if let Some((_player, mut player_health, player_flash, player_transform, player_sprite)) =
+        player_query.iter().iter().next()
+    {
+        for (_, mut enemy_health, maybe_enemy_flash, enemy_transform, enemy_sprite) in
+            &mut enemy_query.iter()
+        {
             let collision = collide(
                 enemy_transform.translation(),
                 enemy_sprite.size,
@@ -607,10 +624,7 @@ fn death_monitor(
     }
 }
 
-fn start_flash(
-    _health: Changed<Health>,
-    mut flash: Mut<HealthFlash>
-) {
+fn start_flash(_health: Changed<Health>, mut flash: Mut<HealthFlash>) {
     flash.0 = 10;
 }
 
@@ -618,17 +632,15 @@ fn flash(
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut flash: Mut<HealthFlash>,
     material: &Handle<ColorMaterial>,
-    mut draw: Mut<Draw>,
+    _draw: Mut<Draw>,
 ) {
     if flash.0 > 0 {
         flash.0 -= 1;
         if let Some(mut material) = materials.get_mut(material) {
             material.color.a = 0.1;
         }
-    } else {
-        if let Some(mut material) = materials.get_mut(material) {
-            material.color.a = 1.0;
-        }
+    } else if let Some(mut material) = materials.get_mut(material) {
+        material.color.a = 1.0;
     }
 }
 
@@ -637,7 +649,9 @@ fn powerup_pickup(
     mut player_query: Query<(&Player, &mut Health, &Transform, &Sprite)>,
     mut powerup_query: Query<(Entity, &Powerup, &Transform, &Sprite)>,
 ) {
-    if let Some((_player, mut player_health, player_transform, player_sprite)) = player_query.iter().iter().next() {
+    if let Some((_player, mut player_health, player_transform, player_sprite)) =
+        player_query.iter().iter().next()
+    {
         for (powerup_entity, _, powerup_transform, powerup_sprite) in &mut powerup_query.iter() {
             let collision = collide(
                 powerup_transform.translation(),
