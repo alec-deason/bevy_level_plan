@@ -5,14 +5,14 @@ use rand::Rng;
 use bevy::{prelude::*, render::camera::OrthographicProjection, sprite::collide_aabb::collide};
 
 use bevy_level_plan::{
-    level_progress_system, Conditional, Cycle, LevelPlan, LevelPlanElement, Sequence, SetComponent,
-    While, Nop,
+    level_plan_system, Conditional, Cycle, LevelPlan, LevelPlanElement, Sequence, SetComponent,
+    While, Nop, LevelContext,
 };
 
 /// LevelPlan related stuff
 
-fn make_level_plan(level_length: f32) -> LevelPlan<LevelContext> {
-    LevelPlan::<LevelContext>::new(
+fn make_level_plan(level_length: f32) -> LevelPlan<ExampleLevelContext> {
+    LevelPlan::<ExampleLevelContext>::new(
         Sequence::default()
             .push(ForDistance::new(
                 level_length - 1800.0,
@@ -32,11 +32,11 @@ fn make_level_plan(level_length: f32) -> LevelPlan<LevelContext> {
                 1000.0,
                 Nop
             ))
-            .push(Conditional::<LevelContext>::new(
+            .push(Conditional::<ExampleLevelContext>::new(
                 move |context| context.player_health < 4,
                 SpawnPowerups,
             ))
-            .push(While::<LevelContext>::new(
+            .push(While::<ExampleLevelContext>::new(
                 |context| context.boss_spawned,
                 SpawnBoss,
             ))
@@ -44,12 +44,12 @@ fn make_level_plan(level_length: f32) -> LevelPlan<LevelContext> {
     )
 }
 
-struct LevelContext {
+struct ExampleLevelContext {
     player_loc: Vec3,
     player_health: u32,
     boss_spawned: bool,
 }
-impl bevy_level_plan::LevelContext for LevelContext {
+impl LevelContext for ExampleLevelContext {
     fn build(world: &World, _resources: &Resources) -> Self {
         let mut player_loc = Vec3::zero();
         let mut player_health = 4;
@@ -72,10 +72,10 @@ impl bevy_level_plan::LevelContext for LevelContext {
 pub struct ForDistance {
     length: f32,
     start: f32,
-    element: Box<dyn LevelPlanElement<LevelContext>>,
+    element: Box<dyn LevelPlanElement<ExampleLevelContext>>,
 }
 impl ForDistance {
-    fn new(length: f32, element: impl LevelPlanElement<LevelContext> + 'static) -> Self {
+    fn new(length: f32, element: impl LevelPlanElement<ExampleLevelContext> + 'static) -> Self {
         Self {
             length,
             start: f32::MAX,
@@ -83,8 +83,8 @@ impl ForDistance {
         }
     }
 }
-impl LevelPlanElement<LevelContext> for ForDistance {
-    fn step(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) -> bool {
+impl LevelPlanElement<ExampleLevelContext> for ForDistance {
+    fn step(&mut self, level: Entity, commands: &mut Commands, context: &mut ExampleLevelContext) -> bool {
         if context.player_loc.y() < self.start + self.length {
             self.element.step(level, commands, context)
         } else {
@@ -92,28 +92,28 @@ impl LevelPlanElement<LevelContext> for ForDistance {
         }
     }
 
-    fn activate(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) {
+    fn activate(&mut self, level: Entity, commands: &mut Commands, context: &mut ExampleLevelContext) {
         self.start = context.player_loc.y();
         self.element.activate(level, commands, context);
     }
 
-    fn deactivate(&mut self, level: Entity, commands: &mut Commands, context: &mut LevelContext) {
+    fn deactivate(&mut self, level: Entity, commands: &mut Commands, context: &mut ExampleLevelContext) {
         self.element.deactivate(level, commands, context);
     }
 }
 
 struct SpawnPowerups;
-impl LevelPlanElement<LevelContext> for SpawnPowerups {
+impl LevelPlanElement<ExampleLevelContext> for SpawnPowerups {
     fn step(
         &mut self,
         _level: Entity,
         _commands: &mut Commands,
-        _context: &mut LevelContext,
+        _context: &mut ExampleLevelContext,
     ) -> bool {
         false
     }
 
-    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut LevelContext) {
+    fn activate(&mut self, _level: Entity, commands: &mut Commands, _context: &mut ExampleLevelContext) {
         for _ in 0..3 {
             commands.spawn((Powerup,));
         }
@@ -150,7 +150,7 @@ fn diver_spawner(
     time: Res<Time>,
     main_camera: Res<MainCamera>,
     mut spawner: Mut<DiverSpawner>,
-    _level: &LevelPlan<LevelContext>,
+    _level: &LevelPlan<ExampleLevelContext>,
 ) {
     spawner.0.tick(time.delta_seconds);
     if spawner.0.finished {
@@ -185,7 +185,7 @@ fn swooper_spawner(
     time: Res<Time>,
     main_camera: Res<MainCamera>,
     mut spawner: Mut<SwooperSpawner>,
-    _level: &LevelPlan<LevelContext>,
+    _level: &LevelPlan<ExampleLevelContext>,
 ) {
     spawner.0.tick(time.delta_seconds);
     if spawner.0.finished {
@@ -216,7 +216,7 @@ fn swooper_spawner(
 fn main() {
     App::build()
         .add_default_plugins()
-        .add_system(level_progress_system::<LevelContext>.thread_local_system())
+        .add_system(level_plan_system::<ExampleLevelContext>.thread_local_system())
         .add_system(player_controls.system())
         .add_system(movement.system())
         .add_system(diver_spawner.system())

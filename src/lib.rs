@@ -3,7 +3,7 @@ use bevy::prelude::*;
 pub trait LevelContext {
     fn build(world: &World, resources: &Resources) -> Self;
 }
-pub fn level_progress_system<T: LevelContext + 'static>(
+pub fn level_plan_system<T: LevelContext + 'static>(
     world: &mut World,
     resources: &mut Resources,
 ) {
